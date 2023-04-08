@@ -6,52 +6,36 @@ metadata:			#Создал пространство имен (для подов)
   name: web-project
   
  ---
-### LoadBalancer
-apiVersion: v1
-kind: Servise
-metadata:
-  name: load-balancer			# создаю балансировщик
-  namespace: web-project
-spec:
-  ports:
-  - port: 80			
-    name: web-project-port
-    targetPort: 8080
-  selector:
-    app: web-project-pod
-  type: LoadBalancer
-  loadBalancerIP: 10.10.130.145		# определение фисированного IP. Через него будет единый доступ ко всем сущестующим подам (развернутом на них приложении), в том числе и вне кластера.
-
- ---
 ### Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: web-project-dep			# сам процес развертывания
-  namespace: deploy
+  name: web-project-dep			# имя процесса развертывания
+  namespace: deploy       # имя пространства имен
   labels:
-    app: web-project-dep
+    app: web-project-dep  # метка
 spec:
-  replicas: 4
+  replicas: 4  # количество подов, которое будет запущенно одновременно в момент развертывания, указал 4, поскольку это то кол-во, которое выдержит пиковую нагрузку. Можно указать и 1, но деплоить ночью, когда нагрузка минимальна.
   
-  strategy:				# cтратегия при которой во время обновления kubernetes
-    type: RollingUpdate			# за раз может обновляться только один под,
+  strategy:				# cтратегия обновления подов
+    type: RollingUpdate			# Этот тип означает плавную замену подов, за раз может обновляться только один под,
       rollingUpdate:			# чтобы не произошла ситуация, когда поды обновляются одновременно
         maxUnavaible: 1			# а приложение недоступно, по этому только 1
   
   selector:
-    matchLables:
-      app: web-project-pod		# вызов пода по метке  
+    matchLables:            # вызов пода по метке, чтобы deployment обнаружил, какими подами нужно управлять
+      app: web-project-pod		  
   template:				# описание шаблона пода 
     metadata:
       lables:
         app: deploy
-    spec:				
-      containers:			# описываю под, в нем контейнер
+    spec:		
+      containers:			# описание контейнера, который хранится в поде
       - name: image-ubuntu		# имя контейнера
         image: adress-image-ubuntu	# образ контейнера (адрес)
       	ports:
       	  containerPort: 8080		# порт контейнера
+         name: http       # имя порта
         
         resources:			# количество ресурсов и лимиты
           requests:			
@@ -59,7 +43,8 @@ spec:
             cpu: 0.1
           limits:			# лимиты я установил следующие поскольку
             memory: "150M"		# задача поставлена на максимально устойчивый деплоймент (запас не - не дорого и не помешает)
-            cpu: 0.4			# запас поставлен не завышенынй, поскольку при 50% использовании CPU создастся новый под, который возьмет на себя часть нагрузки
+                         			# не ставлю лимит для времени использования ЦП, поскольку тебуется максимальная отказоустойчивость, и при повышенном потребеление будет создан новый под (на 50%), который снизит нагрузку на имеющиеся (что должно нормализовать уровень потребления)
+                                                                          
       
       readinessProbe:	 		# проверка роботоспособности, если команда выдаст что 
         exen:				# кроме 0 (healthy), значит сайт unhealthy
@@ -68,7 +53,25 @@ spec:
           - /tmp/health
         initialDelaySeconds: 10		# но первые 10 секунд проверки не будет, поскольку развертывание приложения занимает 5-10 секунд
         periodSeconds: 5		# после, проверка каждые 5 секунд
-    
+
+
+ ---
+### LoadBalancer
+apiVersion: v1
+kind: Servise
+metadata:
+  name: load-balancer			# создаю балансировщик
+  namespace: web-project
+spec:
+  ports:
+  - port: 80         # это порт балансировщика			
+    name: web-project-port
+    targetPort: 8080   # это порт контейнера, на котором доступно приложение
+  selector:
+    app: web-project-pod
+  type: LoadBalancer
+  loadBalancerIP: 10.10.130.145		# заранее зарезервированный IP. Через него будет единый доступ ко всем сущестующим подам (развернутом на них приложении), в том числе и вне кластера.
+
  ---
 ### Horizontal Pod Autoscaler
 apiVersion: autoscaling/v1		
@@ -81,9 +84,9 @@ spec:
     kind: Deployment
     name: web-project-dep
   minReplicas: 1			# минимально возможное количество подов
-  maxReplicas: 4			# максимально возможно кол-во подов
-  metrics: 				# указываю, что при достижении нагрузки н
-  - type: Resource			# а ЦП в 50% будет создан новый под, но если он не пятый.
+  maxReplicas: 5			# максимально возможное кол-во подов (5, а не 4, потому что в момент обновления сначала создастся новый под, а потом удалится старый. В момент пиковой нагрузки должно быть 4 работающих пода)
+  metrics: 				# указываю, что при достижении нагрузки ЦП в 50% будет создан новый под.
+  - type: Resource			  
     resource:
     - name: cpu
       target:
